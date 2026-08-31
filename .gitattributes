@@ -1,0 +1,7 @@
+# Normalise line endings in the repository. Checked out native on Windows,
+# stored as LF, so diffs stay clean against Linux builds on Vercel.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.webp binary

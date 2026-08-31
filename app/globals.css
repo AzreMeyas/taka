@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  /* Paper and ink. Warmer and cleaner than the original sage, which went
+     muddy against the data colours. */
+  --color-paper: #faf9f5;
+  --color-card: #ffffff;
+  --color-rule: #e7e3d8;
+  --color-rule-soft: #f0ede4;
+  --color-band: #f5f2ea;
+  --color-ink: #1a1917;
+  --color-muted: #78736a;
+
+  /* The three kinds. Brighter than before so they separate on a chart. */
+  --color-out: #c2410c;
+  --color-in: #15803d;
+  --color-saved: #1d4ed8;
+
+  /* Series colours for per-domain charts. Domains are user-created and
+     unlimited, so these cycle. Chosen to stay distinguishable from each
+     other and legible on warm paper. */
+  --color-s1: #c2410c;
+  --color-s2: #1d4ed8;
+  --color-s3: #15803d;
+  --color-s4: #a21caf;
+  --color-s5: #a16207;
+  --color-s6: #0f766e;
+  --color-s7: #be123c;
+  --color-s8: #4338ca;
+
+  --font-sans: Archivo, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+html, body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Figures line up in columns. This is a ledger. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Ruled rows, alternating band — accounting paper. */
+.ruled > * {
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+.ruled > *:nth-child(even) {
+  background: var(--color-band);
+}
+
+/* Native date inputs otherwise ignore the page's type scale. */
+input[type="date"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

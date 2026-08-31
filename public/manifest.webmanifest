@@ -1,0 +1,9 @@
+{
+  "name": "Taka — personal ledger",
+  "short_name": "Taka",
+  "start_url": "/ledger",
+  "display": "standalone",
+  "background_color": "#f6f7f2",
+  "theme_color": "#f6f7f2",
+  "icons": []
+}
