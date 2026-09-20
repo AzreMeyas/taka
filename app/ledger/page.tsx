@@ -50,6 +50,7 @@ export default async function LedgerPage({
     to?: string;
     kind?: string;
     chart?: string;
+    split?: string;
     domain?: string;
   }>;
 }) {
@@ -81,7 +82,8 @@ export default async function LedgerPage({
   )
     ? (sp.kind as EntryKind)
     : "expense";
-  const chart: ChartType = sp.chart === "bar" ? "bar" : "line";
+  const chart: ChartType = sp.chart === "bar" ? "bar" : "area";
+  const split = sp.split === "1";
 
   const [domainList, totals, rows, months] = await Promise.all([
     listDomains(user.id),
@@ -121,6 +123,7 @@ export default async function LedgerPage({
       to,
       kind,
       chart,
+      ...(split ? { split: "1" } : {}),
       ...(domainId ? { domain: domainId } : {}),
       ...patch,
     };
@@ -237,6 +240,8 @@ export default async function LedgerPage({
           grains={grains}
           kind={kind}
           chart={chart}
+          split={split}
+          previousTotal={null}
           domainId={domainId}
           domains={domainList}
           series={analysis[0]}

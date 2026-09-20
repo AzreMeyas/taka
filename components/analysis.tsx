@@ -1,78 +1,37 @@
 import Link from "next/link";
-import { formatTaka, formatTakaCompact } from "@/lib/money";
+import { formatTaka } from "@/lib/money";
 import { bucketsBetween, dayLabel, monthLabel, rangeLabel } from "@/lib/dates";
+import { TrendChart, type ChartSeries } from "./trend-chart";
 import type { Grain, SeriesPoint, DomainTotal } from "@/db/queries";
 import type { Domain, EntryKind } from "@/db/schema";
 
-export type ChartType = "line" | "bar";
+export type ChartType = "area" | "bar";
 
-const KINDS: [EntryKind, string][] = [
-  ["expense", "Money out"],
-  ["income", "Money in"],
-  ["savings", "Set aside"],
+const KINDS: [EntryKind, string, string][] = [
+  ["expense", "Money out", "var(--out)"],
+  ["income", "Money in", "var(--in)"],
+  ["savings", "Set aside", "var(--saved)"],
 ];
 
-const GRAIN_LABEL: Record<Grain, string> = {
-  day: "Daily",
-  week: "Weekly",
-  month: "Monthly",
-  year: "Yearly",
-};
-
-/** Cycled per domain. Eight before a colour repeats. */
-const SERIES = [
-  "var(--color-s1)",
-  "var(--color-s2)",
-  "var(--color-s3)",
-  "var(--color-s4)",
-  "var(--color-s5)",
-  "var(--color-s6)",
-  "var(--color-s7)",
-  "var(--color-s8)",
+const ALL_GRAINS: [Grain, string][] = [
+  ["day", "Daily"],
+  ["week", "Weekly"],
+  ["month", "Monthly"],
+  ["year", "Yearly"],
 ];
-const OTHER = "var(--color-muted)";
+
+const SERIES_COLOURS = [
+  "var(--s1)",
+  "var(--s2)",
+  "var(--s3)",
+  "var(--s4)",
+  "var(--s5)",
+  "var(--s6)",
+  "var(--s7)",
+  "var(--s8)",
+];
+const OTHER = "var(--faint)";
 const TOP_N = 8;
-
-/**
- * Round an axis maximum up to the next tidy number. The steps are fine
- * enough that the tallest bar fills most of the plot — 1/2/5 alone would
- * put an 11k peak on a 20k axis and waste half the height — while still
- * halving into a value worth printing on the axis.
- */
-const NICE = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.5, 3, 4, 5, 6, 8, 10];
-function niceMax(v: number): number {
-  if (v <= 0) return 1;
-  const base = Math.pow(10, Math.floor(Math.log10(v)));
-  const n = v / base;
-  return (NICE.find((m) => m >= n) ?? 10) * base;
-}
-
-/**
- * Catmull-Rom through the points, converted to cubic béziers. Control points
- * are clamped to the plot so a curve between two low values cannot bulge
- * below the baseline and imply money that was never spent.
- */
-function smoothPath(pts: [number, number][], top: number, bottom: number): string {
-  if (pts.length === 0) return "";
-  if (pts.length === 1) {
-    const [x, y] = pts[0];
-    return `M ${x} ${y} L ${x} ${y}`;
-  }
-  const clamp = (y: number) => Math.max(top, Math.min(bottom, y));
-  let d = `M ${pts[0][0]} ${pts[0][1]}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] ?? pts[i];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[i + 2] ?? p2;
-    const t = 0.18;
-    d +=
-      ` C ${p1[0] + (p2[0] - p0[0]) * t} ${clamp(p1[1] + (p2[1] - p0[1]) * t)},` +
-      ` ${p2[0] - (p3[0] - p1[0]) * t} ${clamp(p2[1] - (p3[1] - p1[1]) * t)},` +
-      ` ${p2[0]} ${p2[1]}`;
-  }
-  return d;
-}
 
 type EntryRow = {
   id: string;
@@ -83,6 +42,52 @@ type EntryRow = {
   domainName: string;
 };
 
+/** Segmented control. A disabled option stays visible and says why. */
+function Segment({
+  options,
+  current,
+  hrefFor,
+}: {
+  options: { value: string; label: string; disabled?: boolean; why?: string }[];
+  current: string;
+  hrefFor: (v: string) => string;
+}) {
+  return (
+    <div className="inline-flex rounded-control border border-border bg-sunk p-0.5">
+      {options.map((o) => {
+        const on = o.value === current;
+        const base =
+          "rounded-[7px] px-2.5 py-1.5 text-micro font-medium transition-colors";
+        if (o.disabled) {
+          return (
+            <span
+              key={o.value}
+              title={o.why}
+              className={base + " cursor-not-allowed text-faint/60"}
+            >
+              {o.label}
+            </span>
+          );
+        }
+        return (
+          <Link
+            key={o.value}
+            href={hrefFor(o.value)}
+            className={
+              base +
+              (on
+                ? " bg-card text-text shadow-[var(--shadow-card)]"
+                : " text-muted hover:text-text")
+            }
+          >
+            {o.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Analysis({
   from,
   to,
@@ -92,10 +97,12 @@ export function Analysis({
   grains,
   kind,
   chart,
+  split,
   domainId,
   domains,
   series,
   domainTotals,
+  previousTotal,
   recent,
   recentLimit,
   href,
@@ -108,430 +115,355 @@ export function Analysis({
   grains: Grain[];
   kind: EntryKind;
   chart: ChartType;
+  split: boolean;
   domainId: string | null;
   domains: Domain[];
   series: SeriesPoint[];
   domainTotals: DomainTotal[];
+  previousTotal: number | null;
   recent: EntryRow[];
   recentLimit: number;
   href: (patch: Record<string, string>) => string;
 }) {
   const selected = domains.find((d) => d.id === domainId) ?? null;
-  const kindLabel = KINDS.find(([k]) => k === kind)![1];
+  const [, kindLabel, kindColour] = KINDS.find(([k]) => k === kind)!;
 
-  // Ranked domains for this kind — drives colour assignment, the legend and
-  // the chart, so all three agree on which colour means what.
   const ranked = domainTotals.filter((d) => d.kind === kind);
   const kindTotal = ranked.reduce((a, d) => a + d.total, 0);
   const shown = ranked.slice(0, TOP_N);
-  const colourOf = new Map(shown.map((d, i) => [d.domainId, SERIES[i % SERIES.length]]));
+  const colourOf = new Map(
+    shown.map((d, i) => [d.domainId, SERIES_COLOURS[i % SERIES_COLOURS.length]]),
+  );
 
   const buckets = bucketsBetween(from, to, grain);
-  const label = (b: string) =>
+  const index = new Map(buckets.map((b, i) => [b, i]));
+  const labels = buckets.map((b) =>
     grain === "year"
       ? b.slice(0, 4)
       : grain === "month"
         ? monthLabel(b.slice(0, 7)).slice(0, 3)
-        : dayLabel(b);
-
-  // bucket -> domain -> total, with "Other" folding everything past the top N.
-  const at = new Map<string, Map<string, number>>(
-    buckets.map((b) => [b, new Map()]),
+        : dayLabel(b),
   );
-  for (const p of series) {
-    const row = at.get(p.bucket);
-    if (!row) continue;
-    const key = colourOf.has(p.domainId) ? p.domainId : "other";
-    row.set(key, (row.get(key) ?? 0) + p.total);
+
+  // Build the chart series. The default is ONE line — the total for this kind.
+  // Every domain at once is opt-in, because eight overlaid curves is not a
+  // reading of anything.
+  const zeros = () => new Array(buckets.length).fill(0) as number[];
+  let chartSeries: ChartSeries[];
+
+  if (selected) {
+    const vals = zeros();
+    for (const p of series) {
+      if (p.domainId !== selected.id) continue;
+      const i = index.get(p.bucket);
+      if (i !== undefined) vals[i] += p.total;
+    }
+    chartSeries = [
+      {
+        key: selected.id,
+        name: selected.name,
+        colour: colourOf.get(selected.id) ?? kindColour,
+        values: vals,
+      },
+    ];
+  } else if (split) {
+    const byKey = new Map<string, number[]>();
+    for (const p of series) {
+      const i = index.get(p.bucket);
+      if (i === undefined) continue;
+      const key = colourOf.has(p.domainId) ? p.domainId : "other";
+      if (!byKey.has(key)) byKey.set(key, zeros());
+      byKey.get(key)![i] += p.total;
+    }
+    chartSeries = [
+      ...shown.map((d) => ({
+        key: d.domainId,
+        name: d.domainName,
+        colour: colourOf.get(d.domainId)!,
+        values: byKey.get(d.domainId) ?? zeros(),
+      })),
+      ...(ranked.length > TOP_N
+        ? [
+            {
+              key: "other",
+              name: "Other (" + (ranked.length - TOP_N) + ")",
+              colour: OTHER,
+              values: byKey.get("other") ?? zeros(),
+            },
+          ]
+        : []),
+    ].filter((s) => s.values.some((v) => v > 0));
+  } else {
+    const vals = zeros();
+    for (const p of series) {
+      const i = index.get(p.bucket);
+      if (i !== undefined) vals[i] += p.total;
+    }
+    chartSeries = [
+      { key: "total", name: kindLabel, colour: kindColour, values: vals },
+    ];
   }
-  const hasOther = ranked.length > TOP_N;
-  const lines = [
-    ...shown.map((d) => ({
-      key: d.domainId,
-      name: d.domainName,
-      colour: colourOf.get(d.domainId)!,
-    })),
-    ...(hasOther
-      ? [{ key: "other", name: `Other (${ranked.length - TOP_N})`, colour: OTHER }]
-      : []),
-  ];
 
-  // geometry
-  const H = 180;
-  const PAD_L = 50;
-  const PAD_B = 24;
-  const TOP = 10;
-  const plotW = Math.max(buckets.length * (chart === "bar" ? 34 : 26), 250);
-  const stepX = buckets.length > 1 ? plotW / (buckets.length - 1) : 0;
-  const barStep = plotW / Math.max(1, buckets.length);
-  const barW = Math.min(20, barStep * 0.62);
+  const focusTotal = selected
+    ? (ranked.find((d) => d.domainId === selected.id)?.total ?? 0)
+    : kindTotal;
 
-  const stackTotals = buckets.map((b) =>
-    lines.reduce((a, l) => a + (at.get(b)!.get(l.key) ?? 0), 0),
-  );
-  const peak =
-    chart === "bar"
-      ? Math.max(0, ...stackTotals)
-      : Math.max(
-          0,
-          ...buckets.flatMap((b) => lines.map((l) => at.get(b)!.get(l.key) ?? 0)),
-        );
-  const max = niceMax(Math.max(1, peak));
-  const y = (v: number) => H - (v / max) * (H - TOP);
-  const ticks = [0, 0.25, 0.5, 0.75, 1];
-  const labelEvery = Math.ceil(buckets.length / 10);
-  const isEmpty = kindTotal === 0;
+  const delta =
+    previousTotal && previousTotal > 0
+      ? Math.round(((focusTotal - previousTotal) / previousTotal) * 100)
+      : null;
 
   const quick: [string, string, string][] = [
-    ["This month", `${today.slice(0, 7)}-01`, today],
-    ["This year", `${today.slice(0, 4)}-01-01`, today],
+    ["This month", today.slice(0, 7) + "-01", today],
+    ["This year", today.slice(0, 4) + "-01-01", today],
     ...(bounds.first && bounds.last
       ? ([["All time", bounds.first, bounds.last]] as [string, string, string][])
       : []),
   ];
 
   return (
-    <div className="mt-5">
-      {/* range ---------------------------------------------------------- */}
-      <form method="get" action="/ledger" className="flex flex-wrap items-end gap-2">
-        <input type="hidden" name="tab" value="trend" />
-        <input type="hidden" name="grain" value={grain} />
-        <input type="hidden" name="kind" value={kind} />
-        <input type="hidden" name="chart" value={chart} />
-        {domainId && <input type="hidden" name="domain" value={domainId} />}
-        <div className="min-w-0 flex-1">
-          <label htmlFor="from" className="mb-1 block text-[11px] text-muted">
-            From
-          </label>
-          <input
-            id="from"
-            type="date"
-            name="from"
-            defaultValue={from}
-            max={to}
-            className="w-full rounded border border-rule bg-card px-2.5 py-2 text-[13px] outline-none focus:border-ink"
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <label htmlFor="to" className="mb-1 block text-[11px] text-muted">
-            To
-          </label>
-          <input
-            id="to"
-            type="date"
-            name="to"
-            defaultValue={to}
-            min={from}
-            className="w-full rounded border border-rule bg-card px-2.5 py-2 text-[13px] outline-none focus:border-ink"
-          />
-        </div>
-        <button
-          type="submit"
-          className="rounded bg-ink px-4 py-2 text-[13px] font-semibold text-paper"
+    <div className="mt-4 space-y-3">
+      {/* what, and over what window ------------------------------------- */}
+      <section className="card p-3.5">
+        <Segment
+          options={KINDS.map(([k, l]) => ({ value: k, label: l }))}
+          current={kind}
+          hrefFor={(k) => href({ kind: k, domain: "" })}
+        />
+
+        <form
+          method="get"
+          action="/ledger"
+          className="mt-3 grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"
         >
-          Apply
-        </button>
-      </form>
+          <input type="hidden" name="tab" value="trend" />
+          <input type="hidden" name="grain" value={grain} />
+          <input type="hidden" name="kind" value={kind} />
+          <input type="hidden" name="chart" value={chart} />
+          {split && <input type="hidden" name="split" value="1" />}
+          {domainId && <input type="hidden" name="domain" value={domainId} />}
+          <div className="min-w-0">
+            <label htmlFor="from" className="mb-1 block text-micro text-muted">
+              From
+            </label>
+            <input
+              id="from"
+              type="date"
+              name="from"
+              defaultValue={from}
+              max={to}
+              className="w-full rounded-control border border-border bg-card px-2.5 py-2 text-small outline-none focus:border-accent"
+            />
+          </div>
+          <div className="min-w-0">
+            <label htmlFor="to" className="mb-1 block text-micro text-muted">
+              To
+            </label>
+            <input
+              id="to"
+              type="date"
+              name="to"
+              defaultValue={to}
+              min={from}
+              className="w-full rounded-control border border-border bg-card px-2.5 py-2 text-small outline-none focus:border-accent"
+            />
+          </div>
+          <button
+            type="submit"
+            className="col-span-2 rounded-control bg-accent px-4 py-2 text-small font-semibold text-white sm:col-span-1"
+          >
+            Apply
+          </button>
+        </form>
 
-      <div className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-[11.5px] text-muted">
-        {quick.map(([l, f, t]) => (
-          <Link key={l} href={href({ from: f, to: t })} className="underline">
-            {l}
-          </Link>
-        ))}
-      </div>
-
-      {/* what and how --------------------------------------------------- */}
-      <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        <div className="flex overflow-hidden rounded border border-rule">
-          {KINDS.map(([k, l]) => (
+        <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
+          {quick.map(([l, f, t]) => (
             <Link
-              key={k}
-              href={href({ kind: k, domain: "" })}
-              className={`border-r border-rule px-2.5 py-1.5 text-xs last:border-r-0 ${
-                kind === k ? "bg-ink font-semibold text-paper" : "text-muted"
-              }`}
+              key={l}
+              href={href({ from: f, to: t })}
+              className="text-micro text-accent hover:underline"
             >
               {l}
             </Link>
           ))}
         </div>
-        <div className="flex overflow-hidden rounded border border-rule">
-          {(
-            [
-              ["line", "∿", "Curves"],
-              ["bar", "▮", "Stacked"],
-            ] as const
-          ).map(([c, glyph, title]) => (
-            <Link
-              key={c}
-              href={href({ chart: c })}
-              title={title}
-              aria-label={title}
-              className={`border-r border-rule px-2.5 py-1.5 text-xs last:border-r-0 ${
-                chart === c ? "bg-ink font-semibold text-paper" : "text-muted"
-              }`}
+      </section>
+
+      {/* the number and the shape of it ---------------------------------- */}
+      <section className="card p-3.5">
+        <p className="text-micro text-muted">
+          {selected ? selected.name : kindLabel} · {rangeLabel(from, to)}
+        </p>
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="num text-display font-semibold leading-none tracking-tight">
+            <span className="mr-1 text-title opacity-40">৳</span>
+            {formatTaka(focusTotal)}
+          </p>
+          {delta !== null && (
+            <span
+              className="num text-small font-medium"
+              style={{ color: delta > 0 ? "var(--out)" : "var(--in)" }}
             >
-              {glyph}
-            </Link>
-          ))}
+              {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%
+              <span className="ml-1 text-muted">vs previous</span>
+            </span>
+          )}
         </div>
-        <div className="flex overflow-hidden rounded border border-rule">
-          {grains.map((g) => (
+        {buckets.length > 1 && focusTotal > 0 && (
+          <p className="mt-1 text-micro text-muted">
+            {formatTaka(Math.round(focusTotal / buckets.length))} per {grain}
+            {" · "}
+            {buckets.length} {grain}s
+          </p>
+        )}
+
+        <div className="mt-3">
+          <TrendChart
+            labels={labels}
+            series={chartSeries}
+            mode={chart}
+            emptyLabel={
+              "No " +
+              kindLabel.toLowerCase() +
+              (selected ? " against " + selected.name : "") +
+              " in this period."
+            }
+          />
+        </div>
+
+        {/* every grain stays visible; the ones that will not fit say why */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Segment
+            options={ALL_GRAINS.map(([g, l]) => ({
+              value: g,
+              label: l,
+              disabled: !grains.includes(g),
+              why:
+                l +
+                " buckets would be too many marks for this date range — narrow the range to use it.",
+            }))}
+            current={grain}
+            hrefFor={(g) => href({ grain: g })}
+          />
+          <Segment
+            options={[
+              { value: "area", label: "Curve" },
+              { value: "bar", label: "Bars" },
+            ]}
+            current={chart}
+            hrefFor={(c) => href({ chart: c })}
+          />
+          {!selected && (
+            <Segment
+              options={[
+                { value: "", label: "Total" },
+                { value: "1", label: "By domain" },
+              ]}
+              current={split ? "1" : ""}
+              hrefFor={(s) => href({ split: s })}
+            />
+          )}
+          {selected && (
             <Link
-              key={g}
-              href={href({ grain: g })}
-              className={`border-r border-rule px-2.5 py-1.5 text-xs last:border-r-0 ${
-                grain === g ? "bg-ink font-semibold text-paper" : "text-muted"
-              }`}
+              href={href({ domain: "" })}
+              className="rounded-control border border-border px-2.5 py-1.5 text-micro text-muted hover:text-text"
             >
-              {GRAIN_LABEL[g]}
+              ✕ Clear {selected.name}
             </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* headline ------------------------------------------------------- */}
-      <div className="mt-5 border-t border-rule pt-3">
-        <p className="num text-[30px] font-medium leading-none tracking-tight">
-          <span className="mr-1 text-[18px] opacity-45">৳</span>
-          {formatTaka(
-            selected
-              ? (ranked.find((d) => d.domainId === selected.id)?.total ?? 0)
-              : kindTotal,
           )}
-        </p>
-        <p className="mt-1.5 text-[12.5px] text-muted">
-          {selected ? `${selected.name} · ` : ""}
-          {kindLabel.toLowerCase()} · {rangeLabel(from, to)}
-          {buckets.length > 1 && !isEmpty && (
-            <>
-              {" · "}
-              {formatTaka(
-                Math.round(
-                  (selected
-                    ? (ranked.find((d) => d.domainId === selected.id)?.total ?? 0)
-                    : kindTotal) / buckets.length,
-                ),
-              )}{" "}
-              per {grain}
-            </>
-          )}
-        </p>
-      </div>
-
-      {/* chart ---------------------------------------------------------- */}
-      {isEmpty ? (
-        <p className="px-1.5 py-10 text-[13.5px] leading-relaxed text-muted">
-          Nothing recorded as {kindLabel.toLowerCase()}
-          {selected ? ` against ${selected.name}` : ""} between{" "}
-          {rangeLabel(from, to)}.
-        </p>
-      ) : (
-        <div className="-mx-[18px] mt-3 overflow-x-auto px-[18px] pb-1">
-          <svg
-            width={PAD_L + plotW + 10}
-            height={H + PAD_B}
-            role="img"
-            aria-label={`${kindLabel} by ${grain}, ${rangeLabel(from, to)}`}
-          >
-            {ticks.map((t) => {
-              const ty = y(max * t);
-              // Gridlines at every quarter, but only the halves get labels:
-              // a quarter of a round maximum is not itself a round number,
-              // and "3.8k" next to "5k" reads as noise.
-              const labelled = t === 0 || t === 0.5 || t === 1;
-              return (
-                <g key={t}>
-                  <line
-                    x1={PAD_L}
-                    y1={ty}
-                    x2={PAD_L + plotW}
-                    y2={ty}
-                    stroke={t === 0 ? "var(--color-rule)" : "var(--color-rule-soft)"}
-                  />
-                  {labelled && (
-                    <text
-                      x={PAD_L - 7}
-                      y={ty + 3.5}
-                      textAnchor="end"
-                      fontSize="9.5"
-                      fill="var(--color-muted)"
-                      fontFamily="var(--font-mono)"
-                    >
-                      {formatTakaCompact(max * t)}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-
-            {chart === "bar"
-              ? buckets.map((b, i) => {
-                  const x = PAD_L + i * barStep + (barStep - barW) / 2;
-                  let acc = 0;
-                  return (
-                    <g key={b}>
-                      {lines.map((l) => {
-                        const v = at.get(b)!.get(l.key) ?? 0;
-                        if (v <= 0) return null;
-                        const yTop = y(acc + v);
-                        const h = y(acc) - yTop;
-                        acc += v;
-                        return (
-                          <rect
-                            key={l.key}
-                            x={x}
-                            y={yTop}
-                            width={barW}
-                            height={h}
-                            fill={l.colour}
-                          >
-                            <title>{`${label(b)} · ${l.name} ৳${formatTaka(v)}`}</title>
-                          </rect>
-                        );
-                      })}
-                    </g>
-                  );
-                })
-              : lines.map((l) => {
-                  const pts = buckets.map(
-                    (b, i) =>
-                      [PAD_L + i * stepX, y(at.get(b)!.get(l.key) ?? 0)] as [
-                        number,
-                        number,
-                      ],
-                  );
-                  return (
-                    <g key={l.key}>
-                      <path
-                        d={smoothPath(pts, TOP, H)}
-                        fill="none"
-                        stroke={l.colour}
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      {buckets.length <= 40 &&
-                        pts.map(([px, py], i) => (
-                          <circle
-                            key={buckets[i]}
-                            cx={px}
-                            cy={py}
-                            r="2.5"
-                            fill="var(--color-paper)"
-                            stroke={l.colour}
-                            strokeWidth="1.5"
-                          >
-                            <title>{`${label(buckets[i])} · ${l.name} ৳${formatTaka(
-                              at.get(buckets[i])!.get(l.key) ?? 0,
-                            )}`}</title>
-                          </circle>
-                        ))}
-                    </g>
-                  );
-                })}
-
-            {buckets.map((b, i) =>
-              i % labelEvery === 0 ? (
-                <text
-                  key={b}
-                  x={
-                    chart === "bar"
-                      ? PAD_L + i * barStep + barStep / 2
-                      : PAD_L + i * stepX
-                  }
-                  y={H + 16}
-                  textAnchor="middle"
-                  fontSize="9.5"
-                  fill="var(--color-muted)"
-                  fontFamily="var(--font-mono)"
-                >
-                  {label(b)}
-                </text>
-              ) : null,
-            )}
-          </svg>
         </div>
-      )}
+      </section>
 
-      {/* legend, which is also the filter -------------------------------- */}
+      {/* where it went --------------------------------------------------- */}
       {ranked.length > 0 && (
-        <div className="mt-5">
-          <div className="ruled">
-            {ranked.map((r, i) => {
-              const isOn = domainId === r.domainId;
-              const colour =
-                colourOf.get(r.domainId) ?? OTHER;
+        <section className="card overflow-hidden">
+          <p className="px-3.5 pt-3.5 text-micro text-muted">
+            By domain · tap to focus
+          </p>
+          <div className="rows mt-1.5">
+            {ranked.map((r) => {
+              const on = domainId === r.domainId;
+              const pct = kindTotal > 0 ? (r.total / kindTotal) * 100 : 0;
               return (
                 <Link
                   key={r.domainId}
-                  href={href({ domain: isOn ? "" : r.domainId })}
-                  className="flex items-center gap-2.5 px-2 py-2.5"
+                  href={href({ domain: on ? "" : r.domainId })}
+                  className={
+                    "block px-3.5 py-2.5 transition-colors " +
+                    (on ? "bg-accent-soft" : "hover:bg-sunk")
+                  }
                 >
-                  <i
-                    className="h-2.5 w-2.5 shrink-0 rounded-[1px]"
-                    style={{ background: colour }}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[13.5px]">
-                    {r.domainName}
-                    {isOn && <span className="text-muted"> · only</span>}
-                  </span>
-                  <span className="num shrink-0 text-[11.5px] text-muted">
-                    {kindTotal > 0 ? Math.round((r.total / kindTotal) * 100) : 0}%
-                  </span>
-                  <span className="num shrink-0 text-[14px] font-medium">
-                    {formatTaka(r.total)}
-                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <i
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: colourOf.get(r.domainId) ?? OTHER }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-body">
+                      {r.domainName}
+                    </span>
+                    <span className="num shrink-0 text-micro text-muted">
+                      {Math.round(pct)}%
+                    </span>
+                    <span className="num shrink-0 text-body font-medium">
+                      {formatTaka(r.total)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunk">
+                    <div
+                      className="h-1 rounded-full"
+                      style={{
+                        width: pct + "%",
+                        background: colourOf.get(r.domainId) ?? OTHER,
+                      }}
+                    />
+                  </div>
                 </Link>
               );
             })}
           </div>
-          {otherNote(ranked.length)}
-        </div>
+          {ranked.length > TOP_N && (
+            <p className="px-3.5 pb-3 pt-2 text-micro text-faint">
+              Top {TOP_N} are charted; the rest group as Other.
+            </p>
+          )}
+        </section>
       )}
 
-      {/* the entries behind it ------------------------------------------ */}
+      {/* the entries behind it ------------------------------------------- */}
       {recent.length > 0 && (
-        <div className="mt-6">
-          <p className="mb-0.5 text-[12.5px] text-muted">
-            {selected ? `${selected.name} entries` : "Entries in this range"}
-            {recent.length === recentLimit && ` · newest ${recentLimit}`}
+        <section className="card overflow-hidden">
+          <p className="px-3.5 pt-3.5 text-micro text-muted">
+            {selected ? selected.name + " entries" : "Entries in this range"}
+            {recent.length === recentLimit && " · newest " + recentLimit}
           </p>
-          <div className="ruled">
+          <div className="rows mt-1.5">
             {recent.map((r) => (
-              <div key={r.id} className="flex items-center gap-2.5 px-2 py-2.5">
-                <span className="num shrink-0 text-[11.5px] text-muted">
+              <div
+                key={r.id}
+                className="flex items-center gap-2.5 px-3.5 py-2.5"
+              >
+                <span className="num w-14 shrink-0 text-micro text-faint">
                   {dayLabel(r.occurredOn)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13.5px]">
+                <span className="min-w-0 flex-1 truncate text-body">
                   {r.note || r.domainName}
                   {r.note && (
                     <span className="text-muted"> · {r.domainName}</span>
                   )}
                 </span>
                 {r.method && (
-                  <span className="shrink-0 text-[11px] text-muted">
+                  <span className="shrink-0 rounded-full bg-sunk px-2 py-0.5 text-micro text-muted">
                     {r.method}
                   </span>
                 )}
-                <span className="num shrink-0 text-[14px] font-medium">
+                <span className="num shrink-0 text-body font-medium">
                   {formatTaka(r.amountMinor)}
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
-}
-
-/** Note under the legend when domains were folded into "Other". */
-function otherNote(count: number) {
-  return count > TOP_N ? (
-    <p className="mt-1.5 text-[11px] text-muted">
-      Top {TOP_N} charted; the remaining {count - TOP_N} are grouped as Other.
-    </p>
-  ) : null;
 }

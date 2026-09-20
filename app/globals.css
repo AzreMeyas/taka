@@ -1,59 +1,192 @@
 @import "tailwindcss";
 
-@theme {
-  /* Paper and ink. Warmer and cleaner than the original sage, which went
-     muddy against the data colours. */
-  --color-paper: #faf9f5;
-  --color-card: #ffffff;
-  --color-rule: #e7e3d8;
-  --color-rule-soft: #f0ede4;
-  --color-band: #f5f2ea;
-  --color-ink: #1a1917;
-  --color-muted: #78736a;
+/* ---------------------------------------------------------------------------
+   Palette. Every colour is a pair: a light value on :root and a dark value
+   that applies when the system asks for dark, or when [data-theme] forces it.
+   `@theme inline` below maps Tailwind utilities onto these variables rather
+   than baking the values in, which is what lets the theme flip at runtime.
+--------------------------------------------------------------------------- */
 
-  /* The three kinds. Brighter than before so they separate on a chart. */
-  --color-out: #c2410c;
-  --color-in: #15803d;
-  --color-saved: #1d4ed8;
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --card-sunk: #f8f9fb;
+  --border: #e5e7eb;
+  --border-soft: #eef0f3;
+  --text: #111827;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
 
-  /* Series colours for per-domain charts. Domains are user-created and
-     unlimited, so these cycle. Chosen to stay distinguishable from each
-     other and legible on warm paper. */
-  --color-s1: #c2410c;
-  --color-s2: #1d4ed8;
-  --color-s3: #15803d;
-  --color-s4: #a21caf;
-  --color-s5: #a16207;
-  --color-s6: #0f766e;
-  --color-s7: #be123c;
-  --color-s8: #4338ca;
+  --out: #dc2626;
+  --in: #059669;
+  --saved: #2563eb;
+
+  --s1: #4f46e5;
+  --s2: #e11d48;
+  --s3: #0d9488;
+  --s4: #d97706;
+  --s5: #7c3aed;
+  --s6: #65a30d;
+  --s7: #0284c7;
+  --s8: #db2777;
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 12px rgb(16 24 40 / 0.05);
+  --shadow-pop: 0 4px 12px rgb(16 24 40 / 0.08), 0 12px 32px rgb(16 24 40 / 0.10);
+}
+
+/* Follow the system unless the user has explicitly forced light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0d10;
+    --card: #14181d;
+    --card-sunk: #101419;
+    --border: #232a32;
+    --border-soft: #1b2128;
+    --text: #e6e9ee;
+    --muted: #8b95a3;
+    --faint: #6b7583;
+    --accent: #818cf8;
+    --accent-soft: #1e1b4b;
+
+    --out: #f87171;
+    --in: #34d399;
+    --saved: #60a5fa;
+
+    --s1: #818cf8;
+    --s2: #fb7185;
+    --s3: #2dd4bf;
+    --s4: #fbbf24;
+    --s5: #a78bfa;
+    --s6: #a3e635;
+    --s7: #38bdf8;
+    --s8: #f472b6;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.55);
+  }
+}
+
+/* Manual override, same values, wins over the media query. */
+:root[data-theme="dark"] {
+  --bg: #0b0d10;
+  --card: #14181d;
+  --card-sunk: #101419;
+  --border: #232a32;
+  --border-soft: #1b2128;
+  --text: #e6e9ee;
+  --muted: #8b95a3;
+  --faint: #6b7583;
+  --accent: #818cf8;
+  --accent-soft: #1e1b4b;
+
+  --out: #f87171;
+  --in: #34d399;
+  --saved: #60a5fa;
+
+  --s1: #818cf8;
+  --s2: #fb7185;
+  --s3: #2dd4bf;
+  --s4: #fbbf24;
+  --s5: #a78bfa;
+  --s6: #a3e635;
+  --s7: #38bdf8;
+  --s8: #f472b6;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.55);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-sunk: var(--card-sunk);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-out: var(--out);
+  --color-in: var(--in);
+  --color-saved: var(--saved);
+
+  --color-s1: var(--s1);
+  --color-s2: var(--s2);
+  --color-s3: var(--s3);
+  --color-s4: var(--s4);
+  --color-s5: var(--s5);
+  --color-s6: var(--s6);
+  --color-s7: var(--s7);
+  --color-s8: var(--s8);
+
+  /* Aliases kept so components not yet migrated still compile. Remove once
+     breakdown / entry-list / add-entry / domain-manager are rebuilt. */
+  --color-paper: var(--bg);
+  --color-ink: var(--text);
+  --color-rule: var(--border);
+  --color-rule-soft: var(--border-soft);
+  --color-band: var(--card-sunk);
+
+  /* Type scale. Five sizes, no half-pixels. Everything picks from this. */
+  --text-display: 2rem;      /* 32 — the one number that matters */
+  --text-title: 1.25rem;     /* 20 — section heads */
+  --text-body: 0.9375rem;    /* 15 — default reading size */
+  --text-small: 0.8125rem;   /* 13 — supporting text, table cells */
+  --text-micro: 0.6875rem;   /* 11 — labels, axis ticks */
+
+  --radius-card: 14px;
+  --radius-control: 10px;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
 
   --font-sans: Archivo, ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 
-html, body {
-  background: var(--color-paper);
-  color: var(--color-ink);
+html {
+  background: var(--bg);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Figures line up in columns. This is a ledger. */
+/* Figures line up in columns. This is still a ledger. */
 .num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
-/* Ruled rows, alternating band — accounting paper. */
+/* Rows separated by a hairline, not by alternating fills. The old zebra
+   striping made every list read as a spreadsheet. */
 .ruled > * {
-  border-bottom: 1px solid var(--color-rule-soft);
-}
-.ruled > *:nth-child(even) {
-  background: var(--color-band);
+  border-bottom: 1px solid var(--border-soft);
 }
 
-/* Native date inputs otherwise ignore the page's type scale. */
+.rows > * + * {
+  border-top: 1px solid var(--border-soft);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
 input[type="date"] {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
