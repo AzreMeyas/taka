@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/supabase/server";
 import {
   listDomains,
+  listDomainsWithCounts,
   listEntriesForMonth,
   monthTotals,
   breakdownByDomain,
@@ -85,11 +86,12 @@ export default async function LedgerPage({
   const chart: ChartType = sp.chart === "bar" ? "bar" : "area";
   const split = sp.split === "1";
 
-  const [domainList, totals, rows, months] = await Promise.all([
+  const [domainList, totals, rows, months, domainRows] = await Promise.all([
     listDomains(user.id),
     monthTotals(user.id, month),
     listEntriesForMonth(user.id, month),
     monthsWithData(user.id),
+    tab === "domains" ? listDomainsWithCounts(user.id) : Promise.resolve([]),
   ]);
 
   // A domain id from the URL is untrusted: it counts only if it is one of
@@ -254,7 +256,7 @@ export default async function LedgerPage({
 
       {tab === "entries" && <EntryList rows={rows} domains={domainList} />}
 
-      {tab === "domains" && <DomainManager domains={domainList} />}
+      {tab === "domains" && <DomainManager domains={domainRows} />}
 
       <footer className="mt-7 flex gap-4 border-t border-rule pt-3.5 text-xs text-muted">
         <Link href={href({ month: thisMonth })} className="underline">

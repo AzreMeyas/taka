@@ -148,6 +148,94 @@ export async function addDomain(
   }
 }
 
+const renameInput = z.object({
+  id: z.uuid(),
+  name: z.string().trim().min(1, "Give it a name").max(40),
+});
+
+export async function renameDomain(raw: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!user) return { ok: false, error: "Sign in to rename domains." };
+
+  const parsed = renameInput.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid name." };
+  }
+
+  try {
+    // The userId in the WHERE clause is what makes this safe: an id belonging
+    // to someone else simply matches zero rows.
+    const updated = await db
+      .update(domains)
+      .set({ name: parsed.data.name })
+      .where(and(eq(domains.id, parsed.data.id), eq(domains.userId, user.id)))
+      .returning({ id: domains.id });
+
+    if (!updated.length) return { ok: false, error: "That domain doesn't exist." };
+    revalidatePath("/ledger");
+    return { ok: true };
+  } catch (e) {
+    if (typeof e === "object" && e && "code" in e && e.code === "23505") {
+      return { ok: false, error: "You already have a domain with that name." };
+    }
+    throw e;
+  }
+}
+
+const archiveInput = z.object({ id: z.uuid(), archived: z.boolean() });
+
+/**
+ * Archiving hides a domain from new entries without touching its history,
+ * which is the only honest option once something has been logged against it.
+ */
+export async function setDomainArchived(raw: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!user) return { ok: false, error: "Sign in to archive domains." };
+
+  const parsed = archiveInput.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+
+  const updated = await db
+    .update(domains)
+    .set({ archived: parsed.data.archived })
+    .where(and(eq(domains.id, parsed.data.id), eq(domains.userId, user.id)))
+    .returning({ id: domains.id });
+
+  if (!updated.length) return { ok: false, error: "That domain doesn't exist." };
+  revalidatePath("/ledger");
+  return { ok: true };
+}
+
+/**
+ * Only an empty domain can actually be deleted — entries reference domains
+ * with ON DELETE RESTRICT. We attempt the delete and let Postgres decide
+ * rather than counting first, because counting races with a concurrent entry.
+ */
+export async function deleteDomain(id: string): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!user) return { ok: false, error: "Sign in to delete domains." };
+  if (!z.uuid().safeParse(id).success) return { ok: false, error: "Invalid id." };
+
+  try {
+    const removed = await db
+      .delete(domains)
+      .where(and(eq(domains.id, id), eq(domains.userId, user.id)))
+      .returning({ id: domains.id });
+
+    if (!removed.length) return { ok: false, error: "That domain doesn't exist." };
+    revalidatePath("/ledger");
+    return { ok: true };
+  } catch (e) {
+    if (typeof e === "object" && e && "code" in e && e.code === "23503") {
+      return {
+        ok: false,
+        error: "This domain has entries. Archive it instead to keep the history.",
+      };
+    }
+    throw e;
+  }
+}
+
 export async function signOut() {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();

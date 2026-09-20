@@ -19,6 +19,32 @@ export async function listDomains(userId: string) {
     .orderBy(domains.kind, domains.name);
 }
 
+/**
+ * Every domain including archived ones, with how many entries each carries.
+ * The count decides whether a domain can be deleted or only archived, and the
+ * join is scoped to this user on both sides.
+ */
+export async function listDomainsWithCounts(userId: string) {
+  const rows = await db
+    .select({
+      id: domains.id,
+      name: domains.name,
+      kind: domains.kind,
+      archived: domains.archived,
+      count: sql<string>`count(${entries.id})`,
+    })
+    .from(domains)
+    .leftJoin(
+      entries,
+      and(eq(entries.domainId, domains.id), eq(entries.userId, userId)),
+    )
+    .where(eq(domains.userId, userId))
+    .groupBy(domains.id, domains.name, domains.kind, domains.archived)
+    .orderBy(domains.kind, domains.name);
+
+  return rows.map((r) => ({ ...r, count: Number(r.count) }));
+}
+
 export async function listEntriesForMonth(userId: string, month: string) {
   const { from, to } = monthBounds(month);
   return db
